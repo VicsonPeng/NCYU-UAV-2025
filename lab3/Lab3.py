@@ -51,7 +51,7 @@ def two_pass_label(binary: np.ndarray, connectivity: int = 8):
 
     def union(a, b):
         ra, rb = find(a), find(b)
-        if ra == rb:
+        if ra == rb: # already united
             return ra
         if rank[ra] < rank[rb]:
             parent[ra] = rb
@@ -73,10 +73,11 @@ def two_pass_label(binary: np.ndarray, connectivity: int = 8):
                 continue
             cur_label = make_set()
             labels[y,x] = cur_label
-            for dy,dx in neighbors:
+            for dy,dx in neighbors: # 上方和左方鄰居
                 ny, nx = y+dy, x+dx
                 if 0<=ny<H and 0<=nx<W and binary[ny,nx]!=0:
                     union(cur_label, labels[ny,nx])
+
 
     # -------- Pass 2 --------
     label_map = {0:0}
@@ -102,10 +103,11 @@ def two_pass_label(binary: np.ndarray, connectivity: int = 8):
             st['maxx'] = max(st['maxx'], x)
             st['maxy'] = max(st['maxy'], y)
 
+
     return labels, stats
 
 # ============================================================
-# 第一題：C
+# 第一題：
 # ============================================================
 def connected_component(image_path: str, out_path: str = "cc_result.png", connectivity: int = 8):
     gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -127,7 +129,11 @@ def connected_component(image_path: str, out_path: str = "cc_result.png", connec
 # ============================================================
 # 第二題：
 # ============================================================
-def foreground_detection(video_path: str, out_path: str = "output.mp4", area_threshold: int = 250, connectivity: int = 8):
+def foreground_detection(video_path: str, 
+                         out_path: str = "output.mp4", 
+                         mask_out_path: str = "mask_output.mp4", 
+                         area_threshold: int = 250, 
+                         connectivity: int = 8):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise FileNotFoundError(video_path)
@@ -137,11 +143,15 @@ def foreground_detection(video_path: str, out_path: str = "output.mp4", area_thr
     fps = cap.get(cv2.CAP_PROP_FPS)
     w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
 
-    # Background Subtractor (調整參數提高穩定度)
+    # 輸出影片：原始畫面 + 偵測框
+    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    # 輸出影片：純前景 mask
+    out_mask = cv2.VideoWriter(mask_out_path, fourcc, fps, (w, h))
+
+    # Background Subtractor
     backSub = cv2.createBackgroundSubtractorMOG2(
-        varThreshold=20,   # 靈敏度（越小越容易抓到變化）
+        varThreshold=20,
         detectShadows=True
     )
 
@@ -152,29 +162,37 @@ def foreground_detection(video_path: str, out_path: str = "output.mp4", area_thr
 
         fgmask = backSub.apply(frame)
 
+        # 去掉陰影 (shadow pixel < shadow_val)
         shadow_val = backSub.getShadowValue()
-        ret, nmask = cv2.threshold(fgmask, shadow_val, 255, cv2.THRESH_BINARY)
+        _, nmask = cv2.threshold(fgmask, shadow_val, 255, cv2.THRESH_BINARY)
 
+        # 連通元件分析
         labels, stats = two_pass_label(nmask, connectivity)
 
         vis = frame.copy()
         for lid, st in stats.items():
-            w = st['maxx'] - st['minx']
-            h = st['maxy'] - st['miny']
             if st['area'] < area_threshold:
                 continue
             cv2.rectangle(vis, (st['minx'], st['miny']), (st['maxx'], st['maxy']), (0, 255, 0), 2)
-        out.write(vis)
 
-        # 如果要同時顯示可以打開這個
+        # 寫入原始+框的畫面
+        out.write(vis)
+        # 寫入 mask（轉成 3 channel）
+        mask_bgr = cv2.cvtColor(nmask, cv2.COLOR_GRAY2BGR)
+        out_mask.write(mask_bgr)
+
+        # 顯示
         cv2.imshow("Detections", vis)
+        cv2.imshow("Mask", nmask)
         if cv2.waitKey(30) & 0xFF in [27, ord('q')]:
             break
 
     cap.release()
     out.release()
+    out_mask.release()
     cv2.destroyAllWindows()
-    print(f"[Foreground Detection] 已輸出結果影片: {out_path}")
+    print(f"[Foreground Detection] 已輸出結果影片: {out_path} 以及 {mask_out_path}")
+
 
 
 # ============================================================
@@ -182,4 +200,4 @@ def foreground_detection(video_path: str, out_path: str = "output.mp4", area_thr
 # ============================================================
 if __name__ == "__main__":
     connected_component("connected_component.jpg", out_path="cc_result.png")
-    foreground_detection("car.mp4", area_threshold=200)
+    foreground_detection("car.mp4", area_threshold=350)
